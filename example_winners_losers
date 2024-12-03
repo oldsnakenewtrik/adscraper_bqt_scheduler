@@ -1,0 +1,123 @@
+-- CTE to get the most recent positions (within last day) for each URL/location/keyword type combination
+WITH current_positions AS (
+  SELECT 
+    url,
+    location,
+    type,
+    position,
+    timestamp,
+    REGEXP_EXTRACT(url, r'https?://([^/]+)') as domain,  -- Extract domain from full URL
+    ROW_NUMBER() OVER (PARTITION BY url, location, type ORDER BY timestamp DESC) as rn  -- Get most recent entry
+  FROM `organic_rankings.rankings`
+  WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)
+),
+
+-- CTE to get positions from 7-8 days ago for comparison
+previous_positions AS (
+  SELECT 
+    url,
+    location,
+    type,
+    position as prev_position,
+    timestamp as prev_timestamp,
+    REGEXP_EXTRACT(url, r'https?://([^/]+)') as domain,
+    ROW_NUMBER() OVER (PARTITION BY url, location, type ORDER BY timestamp DESC) as rn  -- Get most recent entry from that time period
+  FROM `organic_rankings.rankings`
+  WHERE timestamp BETWEEN 
+    TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 8 DAY) 
+    AND TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+),
+
+-- CTE to calculate aggregate metrics for each domain
+domain_metrics AS (
+  SELECT
+    c.domain,
+    COUNT(DISTINCT c.type) as keywords_ranked_for,  -- Number of different keyword types the domain ranks for
+    AVG(c.position) as avg_current_position,        -- Average current ranking position
+    AVG(p.prev_position) as avg_prev_position,      -- Average position from 7 days ago
+    AVG(p.prev_position - c.position) as avg_position_improvement,  -- Average improvement in position
+    MIN(c.position) as best_position,               -- Best (lowest) position achieved
+    COUNT(CASE WHEN c.position <= 3 THEN 1 END) as top3_appearances,   -- Number of top 3 rankings
+    COUNT(CASE WHEN c.position <= 10 THEN 1 END) as top10_appearances, -- Number of top 10 rankings
+    STRING_AGG(DISTINCT c.type, ', ') as keyword_types                 -- List of keyword types ranked for
+  FROM current_positions c
+  LEFT JOIN previous_positions p
+    ON c.domain = p.domain 
+    AND c.location = p.location
+    AND c.type = p.type
+    AND c.rn = 1 
+    AND p.rn = 1
+  GROUP BY c.domain
+  HAVING COUNT(DISTINCT c.type) >= 2  -- Only include domains that rank for at least 2 keyword types
+),
+
+-- CTE to identify overall winners based on top positions and average ranking
+winners AS (
+  SELECT
+    'Overall Winners' as category,
+    domain,
+    keywords_ranked_for,
+    avg_current_position,
+    avg_prev_position,
+    avg_position_improvement,
+    best_position,
+    top3_appearances,
+    top10_appearances,
+    keyword_types,
+    ROW_NUMBER() OVER (ORDER BY (top3_appearances + top10_appearances) DESC, avg_current_position ASC) as rank
+  FROM domain_metrics
+  WHERE avg_current_position <= 20  -- Focus on domains with good average positions
+),
+
+-- CTE to identify domains with biggest ranking improvements
+gainers AS (
+  SELECT
+    'Biggest Gainers' as category,
+    domain,
+    keywords_ranked_for,
+    avg_current_position,
+    avg_prev_position,
+    avg_position_improvement,
+    best_position,
+    top3_appearances,
+    top10_appearances,
+    keyword_types,
+    ROW_NUMBER() OVER (ORDER BY avg_position_improvement DESC) as rank
+  FROM domain_metrics
+  WHERE avg_position_improvement > 0
+),
+
+-- CTE to identify domains with biggest ranking declines
+decliners AS (
+  SELECT
+    'Biggest Decliners' as category,
+    domain,
+    keywords_ranked_for,
+    avg_current_position,
+    avg_prev_position,
+    avg_position_improvement,
+    best_position,
+    top3_appearances,
+    top10_appearances,
+    keyword_types,
+    ROW_NUMBER() OVER (ORDER BY avg_position_improvement ASC) as rank
+  FROM domain_metrics
+  WHERE avg_position_improvement < 0
+)
+
+-- Final query to combine top 10 domains from each category
+SELECT * FROM (
+  SELECT * FROM winners WHERE rank <= 10
+  UNION ALL
+  SELECT * FROM gainers WHERE rank <= 10
+  UNION ALL
+  SELECT * FROM decliners WHERE rank <= 10
+)
+-- Order results by category (Winners first, then Gainers, then Decliners) and rank within each category
+ORDER BY 
+  CASE category
+    WHEN 'Overall Winners' THEN 1
+    WHEN 'Biggest Gainers' THEN 2
+    WHEN 'Biggest Decliners' THEN 3
+  END,
+  rank;
