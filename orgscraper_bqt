@@ -1,0 +1,198 @@
+import time
+import urllib.parse
+from serpapi import GoogleSearch
+from google.cloud import bigquery
+from google.oauth2 import service_account
+from datetime import datetime, timedelta
+import pytz
+import logging
+
+def setup_logger():
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # Create a file handler and set the logging level
+    file_handler = logging.FileHandler('log_organic.txt')
+    file_handler.setLevel(logging.INFO)
+
+    # Create a console handler and set the logging level
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+
+    # Create a formatter and add it to the handlers
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+
+    # Add the handlers to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
+def main():
+    logger = setup_logger()
+
+    logger.info('Script execution started')
+
+    # Set up BigQuery client
+    credentials = service_account.Credentials.from_service_account_file('XXXXXXXXXXXXXXXXXXX')
+    client = bigquery.Client(credentials=credentials, project='XXXXXXXXXXXXXXXXXXX')
+    logger.info('BigQuery client set up successfully')
+
+    # Dictionary mapping search keywords to their corresponding BigQuery destinations
+    # Each keyword maps to a dictionary containing:
+    #   - dataset: The BigQuery dataset name (organic_rankings)
+    #   - table: The specific table suffix for this keyword's data
+    keywords = {
+        "XXXXXXXXX": {"dataset": "organic_rankings", "table": "rankings"},     # Main keyword search
+        "XXXXXXXXX": {"dataset": "organic_rankings", "table": "rankings_s"},   # commercial intent search
+        "XXXXXXXXX": {"dataset": "organic_rankings", "table": "rankings_p"},   # informational intent search
+        "XXXXXXXXX": {"dataset": "organic_rankings", "table": "rankings_b"}    # branded keyword search
+    }
+    logger.info(f'Keywords and table mappings: {keywords}')
+
+    # Set the Eastern timezone
+    eastern = pytz.timezone('US/Eastern')
+    fmt = '%Y-%m-%d %H:%M:%S'
+    now_time = datetime.now(eastern)
+    logger.info(f'Current timestamp: {now_time.strftime(fmt)}')
+
+    # Get the current date and time in Eastern Time
+    now = datetime.now(eastern)
+
+    # Calculate the start and end of today in Eastern Time
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+    logger.info(f'Today start: {today_start}, Today end: {today_end}')
+
+    # Define the table schema
+    schema = [
+        bigquery.SchemaField("timestamp", "TIMESTAMP"),
+        bigquery.SchemaField("location", "STRING"),
+        bigquery.SchemaField("type", "STRING"),
+        bigquery.SchemaField("position", "INTEGER"),
+        bigquery.SchemaField("url", "STRING")
+    ]
+    logger.info(f'Table schema: {schema}')
+
+    # Define the list of locations to search for
+    locations = [
+        "Miami-Ft. Lauderdale, FL, Florida, United States",
+        "Jacksonville, Florida, United States",
+        "New York County, New York, United States",
+        "Kings County, New York, United States",
+        "Los Angeles County, California, United States",
+        "Santa Clara County, California, United States",
+        "Dallas-Ft. Worth, TX, Texas, United States",
+        "San Antonio TX, Texas, United States",
+        "Mecklenburg County, North Carolina, United States",
+        "Charlotte, North Carolina, United States",
+        "Indianapolis, IN, Indiana, United States",
+        "Lake County, Indiana, United States",
+        "Philadelphia, Pennsylvania, United States",
+        "Allegheny County, Pennsylvania, United States",
+        "Phoenix, AZ, Arizona, United States",
+        "Tucson (Sierra Vista), AZ, Arizona, United States",
+        "Chicago, Illinois, United States",
+        "Sangamon County, Illinois, United States"
+    ]
+    logger.info(f'Locations to search: {locations}')
+
+    # Define device types and their corresponding table suffixes
+    devices = {
+        "desktop": "",
+        "mobile": "_m",
+        "tablet": "_t"
+    }
+
+    for keyword, table_info in keywords.items():
+        logger.info(f'Processing keyword: {keyword}')
+        dataset_id = table_info["dataset"]
+        base_table_id = table_info["table"]
+
+        for device, suffix in devices.items():
+            table_id = f"{base_table_id}{suffix}"
+            logger.info(f'Processing device: {device}, table: {table_id}')
+
+            # Create dataset and table (if they don't exist)
+            dataset_ref = client.dataset(dataset_id)
+            dataset = bigquery.Dataset(dataset_ref)
+            dataset = client.create_dataset(dataset, exists_ok=True)
+            logger.info(f'Dataset {dataset_id} created (if not exists)')
+
+            table_ref = dataset.table(table_id)
+            table = bigquery.Table(table_ref, schema=schema)
+            table = client.create_table(table, exists_ok=True)
+            logger.info(f'Table {table_id} created (if not exists)')
+
+            rows_to_insert = []
+
+            for location in locations:
+                logger.info(f'Processing location: {location} for device: {device}')
+                # Define the search parameters
+                params = {
+                    "api_key": "XXXXXXXXXXXXXXXXXXX",
+                    "engine": "google",
+                    "q": keyword,
+                    "location": location,
+                    "google_domain": "google.com",
+                    "gl": "us",
+                    "hl": "en",
+                    "no_cache": True,
+                    "device": device,
+                    "num": 100  # Get maximum number of organic results
+                }
+
+                try:
+                    search = GoogleSearch(params)
+                    results = search.get_dict()
+                    logger.info(f'SerpAPI request successful for location: {location}, device: {device}')
+                except Exception as e:
+                    logger.error(f'Error making SerpAPI request for location: {location}, device: {device}')
+                    logger.error(str(e))
+                    continue
+
+                if 'organic_results' in results:
+                    for result in results['organic_results']:
+                        try:
+                            # Extract domain from link
+                            domain = urllib.parse.urlparse(result.get("link", "")).netloc
+                            timestamp = now_time.strftime('%Y-%m-%d %H:%M:%S')
+                            
+                            rows_to_insert.append({
+                                "timestamp": timestamp,
+                                "location": location,
+                                "type": "organic",
+                                "position": result.get("position", 0),
+                                "url": domain
+                            })
+                            logger.info(f'Organic position data appended for location: {location}, device: {device}, url: {domain}')
+                        except Exception as e:
+                            logger.error(f'Error parsing organic result for location: {location}, device: {device}')
+                            logger.error(f'Result data: {result}')
+                            logger.error(str(e))
+                else:
+                    logger.warning(f'No organic results found for location: {location}, device: {device}')
+
+                # Add delay to respect rate limits
+                time.sleep(2)
+
+            logger.info(f'Total rows to insert for keyword "{keyword}", device "{device}": {len(rows_to_insert)}')
+
+            try:
+                # Insert the rows into BigQuery
+                errors = client.insert_rows_json(table, rows_to_insert)
+                if errors == []:
+                    logger.info(f'Data inserted successfully for keyword: {keyword}, device: {device}')
+                else:
+                    logger.error(f'Errors encountered while inserting rows for keyword: {keyword}, device: {device}')
+                    logger.error(errors)
+            except Exception as e:
+                logger.error(f'Error inserting data into BigQuery for keyword: {keyword}, device: {device}')
+                logger.error(str(e))
+
+    logger.info('Script execution completed')
+
+if __name__ == "__main__":
+    main()
