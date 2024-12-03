@@ -1,9 +1,9 @@
 # adscraper_bqt_scheduler
 a simple python script to schedule google scrape and insert to bigquery tables
 
-# Google Search Rankings Tracker
+# Google Search Ad Rankings Tracker
 
-This script tracks Google search rankings and shopping results across multiple locations and devices, storing the data in Google BigQuery for analysis. It monitors ad positions and shopping results for specified keywords across various US locations.
+This script tracks Google search ad rankings and shopping results across multiple locations and devices, storing the data in Google BigQuery for analysis. It monitors ad positions and shopping results for specified keywords across various US locations.
 
 ## Features
 
