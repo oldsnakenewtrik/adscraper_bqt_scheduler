@@ -9,7 +9,7 @@ This script tracks Google search rankings and shopping results across multiple l
 
 - Tracks multiple keywords with different search intents (main, commercial, informational, and branded)
 - Monitors search results across desktop, mobile, and tablet devices
-- Covers 18 different US locations
+- Covers 18 different US locations and more if your budget allows.
 - Captures both advertising and shopping results
 - Stores data in Google BigQuery for analysis
 - Comprehensive logging system
@@ -117,6 +117,11 @@ The script monitors search results across multiple US locations, including:
 - Multiple states and counties
 - Various demographic regions
 
+## Geographic Coverage
+
+Use VPS native task scheduler or preferred task scheduling software
+![image](https://github.com/user-attachments/assets/46c9559f-6036-4884-8ccf-5892b64611ce)
+
 ## Maintenance
 
 Regular maintenance tasks:
@@ -125,6 +130,10 @@ Regular maintenance tasks:
 3. Verify data integrity
 4. Update locations list as needed
 5. Rotate API keys as required
+
+## Charting
+
+Use Looker Studio, Metabase or Flask app to display in preferred format. 
 
 ## Security Notes
 
